@@ -1,1 +1,166 @@
+create-expense/
+import json
+import uuid
+import boto3
+from datetime import datetime
 
+dynamodb = boto3.resource('dynamodb')
+table = dynamodb.Table('Expenses')
+
+def lambda_handler(event, context):
+    body = json.loads(event["body"])
+
+    item = {
+        'userId': "test-user",
+        'expenseId': str(uuid.uuid4()),
+        'amount': body["amount"],
+        'category': body["category"],
+        'description': body.get("description", ""),
+        'createdAt': datetime.utcnow().isoformat()
+    }
+    table.put_item(Item=item)
+
+    return {
+        'statusCode': 201,
+        "headers": {
+            "Content-type": "application/json"
+        },
+        'body': json.dumps(item)
+    }
+
+
+get-expense/
+import json
+import boto3
+from decimal import Decimal
+from boto3.dynamodb.conditions import Key
+
+dynamodb = boto3.resource('dynamodb')
+table = dynamodb.Table('Expenses')
+
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, Decimal):
+            return float(obj)
+        return super().default(obj)
+
+def lambda_handler(event, context):
+    response = table.query(
+        KeyConditionExpression=Key('userId').eq('test-user')
+    )
+
+    items = response.get("Items",[])
+
+    return {
+        'statusCode': 200,
+        "headers":{
+            "Content-Type": "application/json"
+        },
+        'body': json.dumps(items, cls=DecimalEncoder)
+    }
+
+update_expense/
+
+import json
+import boto3
+from decimal import Decimal
+
+dynamodb = boto3.resource("dynamodb")
+table = dynamodb.Table("Expenses")
+
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, Decimal):
+            return float(obj)
+        return super().default(obj)
+
+def lambda_handler(event, context):
+    try:
+        print("EVENT:", json.dumps(event))
+
+        path_params = event.get("pathParameters") or {}
+        expense_id = path_params.get("expenseId")
+
+        if not expense_id:
+            return {
+                "statusCode": 400,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps({
+                    "error": "Missing path parameter: expenseId",
+                    "event": event
+                }, cls=DecimalEncoder)
+            }
+
+        raw_body = event.get("body")
+        if raw_body is None:
+            return {
+                "statusCode": 400,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps({
+                    "error": "Missing request body",
+                    "event": event
+                }, cls=DecimalEncoder)
+            }
+
+        body = json.loads(raw_body) if isinstance(raw_body, str) else raw_body
+
+        response = table.update_item(
+            Key={
+                "userId": "test-user",
+                "expenseId": expense_id
+            },
+            UpdateExpression="SET amount = :a, category = :c, description = :d",
+            ExpressionAttributeValues={
+                ":a": body["amount"],
+                ":c": body["category"],
+                ":d": body.get("description", "")
+            },
+            ReturnValues="ALL_NEW"
+        )
+
+        updated_item = response.get("Attributes", {})
+
+        return {
+            "statusCode": 200,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps(updated_item, cls=DecimalEncoder)
+        }
+
+    except Exception as e:
+        print("ERROR:", str(e))
+        return {
+            "statusCode": 500,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({
+                "error": str(e),
+                "event": event
+            }, cls=DecimalEncoder)
+        }
+
+delete_expense/
+
+import json
+import boto3
+
+dynamodb = boto3.resource('dynamodb')
+table = dynamodb.Table('Expenses')
+
+def lambda_handler(event, context):
+    expense_id = event['pathParameters']['expenseId']
+
+    table.delete_item(
+        Key={
+            'userId': 'test-user',
+            'expenseId': expense_id
+        }
+    )
+    return {
+        'statusCode': 200,
+        "headers": {
+            "Content-Type": "application/json"
+        },
+        "body": json.dumps({
+            "message": "Expenses deleted successfully",
+            "expenseId": expense_id
+        })
+    }
